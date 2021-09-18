@@ -1,0 +1,626 @@
+import RPi.GPIO as GPIO
+from time import sleep
+import time
+import numpy as np
+from dataclasses import fields
+from math import degrees, atan2
+import smbus
+import math
+import cv2
+import imutils
+bus = smbus.SMBus(1)
+from threading import Thread
+import threading
+######################################################################
+#Magnetometer
+LIS3MDL_M_ADDRESS       = 0x1E
+LIS3MDL_WHO_AM_I_M      = 0x0F
+LIS3MDL_CTRL_REG1_M     = 0x20
+LIS3MDL_CTRL_REG2_M     = 0x21
+LIS3MDL_CTRL_REG3_M     = 0x22
+LIS3MDL_CTRL_REG4_M     = 0x23
+LIS3MDL_STATUS_REG_M        = 0x27
+LIS3MDL_OUT_X_L_M       = 0x28
+LIS3MDL_OUT_X_H_M       = 0x29
+LIS3MDL_OUT_Y_L_M       = 0x2A
+LIS3MDL_OUT_Y_H_M       = 0x2B
+LIS3MDL_OUT_Z_L_M       = 0x2C
+LIS3MDL_OUT_Z_H_M       = 0x2D
+LIS3MDL_TEMP_OUT_L_M        = 0x2E
+LIS3MDL_TEMP_OUT_H_M        = 0x2F
+LIS3MDL_INT_CFG_M       = 0x30
+LIS3MDL_INT_SRC_M       = 0x31
+LIS3MDL_INT_THS_L_M     = 0x32
+LIS3MDL_INT_THS_H_M     = 0x33
+LIS3MDL_REG_CTL_1_TEMP_EN   = 0x80
+LIS3MDL_REG_CTL_2_RESET     = 0x04
+# mag_scale defines all possible FSR's of the magnetometer:
+
+LIS3MDL_M_SCALE_4GS         = 0x20 # 00:  4Gs
+LIS3MDL_M_SCALE_8GS     = 0x40 # 01:  8Gs
+LIS3MDL_M_SCALE_12GS        = 0x60 # 10:  12Gs
+LIS3MDL_M_SCALE_16GS        = 0x60 # 11:  16Gs
+
+# mag_oder defines all possible output data rates of the magnetometer:
+LIS3MDL_M_ODR_625       = 0x04 # 6.25 Hz
+LIS3MDL_M_ODR_125       = 0x08 # 12.5 Hz
+LIS3MDL_M_ODR_25        = 0x0C # 25 Hz
+LIS3MDL_M_ODR_5         = 0x10 # 50
+LIS3MDL_M_ODR_10        = 0x14 # 10 Hz
+LIS3MDL_M_ODR_20        = 0x14 # 20 Hz
+LIS3MDL_M_ODR_40        = 0x14 # 40 Hz
+LIS3MDL_M_ODR_80        = 0x14 # 80 Hz
+
+mRes = 4.0 / 32768.0   # 4G
+SENSITIVITY_OF_MIN_SCALE = 27368.0 # (4 guass scale) * (6842 LSB/guass at 4 guass scale)
+Scale = 16
+def initialise():
+# initMag -- Sets up the magnetometer to begin reading.
+
+    #User Register Reset Function
+    bus.write_byte_data(LIS3MDL_M_ADDRESS, LIS3MDL_CTRL_REG2_M, LIS3MDL_REG_CTL_2_RESET)
+    #Temperature Sensor Enabled
+    bus.write_byte_data(LIS3MDL_M_ADDRESS, LIS3MDL_CTRL_REG1_M, LIS3MDL_REG_CTL_1_TEMP_EN )
+    #Ultra High Performance Mode Selected for XY Axis
+    bus.write_byte_data(LIS3MDL_M_ADDRESS, LIS3MDL_CTRL_REG1_M, 0x60)
+    #Ultra High Performance Mode Selected for Z Axis
+    bus.write_byte_data(LIS3MDL_M_ADDRESS, LIS3MDL_CTRL_REG4_M, 0x0C)
+    #Output Data Rate of 80 Hz Selected
+    bus.write_byte_data(LIS3MDL_M_ADDRESS, LIS3MDL_CTRL_REG1_M, 0x1C)
+    #Continous Conversion Mode,4 wire interface Selected
+    bus.write_byte_data(LIS3MDL_M_ADDRESS, LIS3MDL_CTRL_REG3_M, 0x00)
+    # 16 guass Full Scale
+    bus.write_byte_data(LIS3MDL_M_ADDRESS, LIS3MDL_CTRL_REG2_M, 0x60)
+
+
+
+
+#Read the magnetometer output registers.
+
+# This will read all six Magnetometer output registers.
+
+
+
+# Reading the  Magnetometer X-Axis Values from the Register
+
+def readMagx():
+        Mag_l = bus.read_byte_data(LIS3MDL_M_ADDRESS,LIS3MDL_OUT_X_L_M)
+        Mag_h = bus.read_byte_data(LIS3MDL_M_ADDRESS,LIS3MDL_OUT_X_H_M)
+        Mag_total = (Mag_l | Mag_h <<8)
+        return Mag_total  if Mag_total < 32768 else Mag_total - 65536
+
+
+
+# Reading the  Magnetometer Y-Axis Values from the Register
+
+def readMagy():
+        Mag_l = bus.read_byte_data(LIS3MDL_M_ADDRESS,LIS3MDL_OUT_Y_L_M)
+        Mag_h = bus.read_byte_data(LIS3MDL_M_ADDRESS,LIS3MDL_OUT_Y_H_M)
+        Mag_total = (Mag_l | Mag_h <<8)
+        return Mag_total  if Mag_total < 32768 else Mag_total - 65536
+
+
+
+# Reading the  Magnetometer Z-Axis Values from the Register
+
+def readMagz():
+
+        Mag_l = bus.read_byte_data(LIS3MDL_M_ADDRESS,LIS3MDL_OUT_Z_L_M)
+        Mag_h = bus.read_byte_data(LIS3MDL_M_ADDRESS,LIS3MDL_OUT_Y_H_M)
+        Mag_total = (Mag_l | Mag_h <<8)
+        return Mag_total  if Mag_total < 32768 else Mag_total - 65536
+
+
+def MagDataTotal():
+
+        mtotal = (((readMagx()**2)+(readMagy()**2)+(readMagz()**2))**0.5)
+        return mtotal
+
+#Initialising the Device.
+initialise()
+
+Period_= 0
+relay = 14
+Lord=0
+distance = 0
+GPIO.setmode(GPIO.BCM)
+GPIO.setwarnings(False)
+GPIO.setup(relay,GPIO.OUT)
+GPIO.output(relay, GPIO.LOW)
+TRIG = 6
+ECHO = 16
+GPIO.setup(TRIG, GPIO.OUT)
+GPIO.output(TRIG,0)
+GPIO.setup(ECHO, GPIO.IN)
+def start():
+    GPIO.output(relay, GPIO.HIGH)
+
+
+def stop():
+    GPIO.output(relay,GPIO.LOW)
+
+def Mesut_Eyezil():
+    GPIO.output(TRIG, True)
+    time.sleep(0.1)
+    GPIO.output(TRIG, False)
+    start = time.time()
+    end = time.time()
+    while GPIO.input(ECHO) == 0:
+
+        start = time.time()
+    while GPIO.input(ECHO) == 1:
+        end = time.time()
+
+    duration = end - start
+    distance = duration * 17150
+    globals()["distance"] = round(distance)
+
+GPIO.setup(24, GPIO.OUT)
+
+pwm= GPIO.PWM(24,50)
+
+pwm.start(0)
+
+Greg = 7.5
+Right_Turn = 2
+Left_Turn = 10
+
+#pwm.ChangeDutyCycle(7)
+blocks = 0
+angle_red=0
+
+angle_green=0
+
+Red_Block = 0
+
+Green_Block = 0
+def See_it(image):
+
+    #blurred_image = cv2.GaussianBlur(image,(5,5), 0)
+
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+    low_green = np.array([60,60,60])
+
+    up_green = np.array([90,255,255])
+
+
+
+    green_mask = cv2.inRange(hsv,low_green,up_green)
+
+    green = cv2.bitwise_and(image,image, mask = green_mask)
+
+
+
+    low_red = np.array([160,50,50])
+
+    up_red = np.array([189,255,255])
+
+    red_mask= cv2.inRange(hsv,low_red,up_red)
+
+    red=cv2.bitwise_and(image,image,mask=red_mask)
+
+    cnts = cv2.findContours(red_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+    cnts = imutils.grab_contours(cnts)
+
+    cnts2 = cv2.findContours(green_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+    cnts2 = imutils.grab_contours(cnts2)
+
+    for c in cnts:
+
+         areaRooi = cv2.contourArea(c)
+
+         if areaRooi > 500:
+
+             x,y,w,h = cv2.boundingRect(c)
+
+             cv2.rectangle(red,(x,y),(x+w,y+h), (255,0,0), 3)
+
+             #cv2.putText(image, 'red' , (x-20,y-20), cv2FONT_HERSHEY_PLAIN, 1)
+
+             #print("red")
+
+             globals()["Red_Block"]=1
+             globals()["Period_"]=areaRooi
+             #globals()['blocks'] = 1
+
+
+
+    for c in cnts2:
+
+         areaGroen = cv2.contourArea(c)
+
+         if areaGroen > 500:
+
+             x,y,w,h = cv2.boundingRect(c)
+
+             cv2.rectangle(green,(x,y),(x+w,y+h), (255,0,0), 3)
+
+             #cv2.putText(image, 'red' , (x-20,y-20), cv2FONT_HERSHEY_PLAIN, 1)
+
+             #print(areaRooi)
+
+             globals()["Green_Block"]=1
+             globals()["Lord"]= areaGroen
+             #globals()['blocks'] = 1
+    if Green_Block and Red_Block == 1:
+        globals()['blocks'] = 2
+    if Green_Block or Red_Block == 1:
+        globals()['blocks'] = 1
+    if Green_Block and Red_Block == 0:
+        globals()['blocks'] = 0
+
+
+
+    result = (green + red)
+
+    cv2.imshow('Through Ball Of Dreams',image)
+    cv2.imshow("mask", result)
+    cv2.waitKey(1)
+
+daniel = 0
+
+def Red_Sent():
+    if Period_>1000:
+        pwm.ChangeDutyCycle(Right_Turn)
+        print("start")
+        print("in life")
+        print("we wait")
+        print("for the good things")
+        print("red seen")
+        globals()["daniel"]=1
+    else:
+        pwm.ChangeDutyCycle(Greg)
+
+
+
+
+lego = 0
+
+def Green_Sent():
+    if Lord>500:
+      pwm.ChangeDutyCycle(Left_Turn)
+      print("start")
+      print("in life")
+      print("we wait")
+      print("for the good things")
+      print("green seen")
+      globals()["lego"]=1
+    else:
+        pwm.ChangeDutyCycle(Greg)
+
+
+
+
+
+
+
+
+
+
+Water=0
+
+def Asian():
+    Magx = readMagx()
+    Magy = readMagy()
+    Magz = readMagz()
+    Mtotal = MagDataTotal()
+    #print(Magx,Magy,Magz)
+    globals()["angle"] = 180 * atan2(Magy,Magx)/math.pi
+    if globals()["angle"] < 0:
+        globals()["angle"] += 360
+
+def Moderator():
+    Magx = readMagx()
+    Magy = readMagy()
+    Magz = readMagz()
+    Mtotal = MagDataTotal()
+    #print(Magx,Magy,Magz)
+    globals()["angle"] = 180 * atan2(Magy,Magx)/math.pi
+    if globals()["angle"] < 0:
+        globals()["angle"] += 360
+
+
+
+while True:
+    Mesut_Eyezil()
+    sleep(0.1)
+    Asian()
+    #print(light_intensity)
+    globals()["Straight"]= 0
+    globals()["Right"]=0
+    globals()["Back"]=0
+    globals()["Left"]=0
+    while Water == 0:
+
+     while Straight ==0:
+         Mesut_Eyezil()
+         sleep(0.1)
+         if distance < 8:
+             Asian()
+             sleep(0.1)
+             globals()["Straight"]= angle
+             if 345<Straight<360:
+                 Straight=3
+             print(Straight)
+             print("Straight")
+             break
+     sleep(2)
+
+     while Right==0:
+         Mesut_Eyezil()
+         sleep(0.1)
+         if distance < 8:
+             Asian()
+             sleep(0.1)
+             globals()["Right"]=angle
+             if 345<Right<360:
+                 Right=3
+             print(Right)
+             print('Right')
+             break
+     sleep(2)
+     while Back==0:
+         Mesut_Eyezil()
+         sleep(0.1)
+         if distance < 8:
+             Asian()
+             sleep(0.1)
+             globals()["Back"]=angle
+             if 345<Back<360:
+                 Back=3
+             print(Back)
+             print('Back')
+             break
+     sleep(2)
+     while Left==0:
+         Mesut_Eyezil()
+         sleep(0.1)
+         if distance < 8:
+             Asian()
+             sleep(0.1)
+             globals()["Left"]=angle
+             if 345<Left<360:
+                 Left=3
+             print(Left)
+             print('Left')
+             break
+     sleep(0.1)
+     original = distance
+     sleep(2)
+     print('Sibu')
+     globals()["Water"] += 1
+     sleep(10)
+     break
+    break
+Water = 1
+cap = cv2.VideoCapture(0)
+cap.set(3,320)
+cap.set(4,240)
+
+def work_please():
+    #while True:
+    ret,image = cap.read()
+    image = imutils.rotate(image, 270)
+    See_it(image)
+def Red_Straight():
+     globals()["Swan"]=0
+     globals()["blocks"]=0
+     globals()["amen"]=0
+     globals()["Period_"]=0
+     globals()["Lord"]=0
+     print('Please Lord')
+     print('In the name of Jesus')
+     print('amen')
+     globals()["lincoln"]=0
+     globals()["lego"]=0
+     globals()["Shell"]=1
+
+DapOnItWagwan=0
+def Turn_Asseblief():
+     #print("angle", angle
+     #print("right", Right)
+     Moderator()
+     sleep(0.1)
+     pwm.ChangeDutyCycle(Right_Turn)
+     sleep(0.1)
+     Asian()
+     sleep(0.1)
+     print(angle)
+     if (Back-21)< angle <(Back+13):
+         pwm.ChangeDutyCycle(Greg+0.8)
+         sleep(1)
+         Mtha = 0
+         Zyi = 2
+         Robin=0
+         globals()["DapOnItWagwan"]=1
+         Shell=0
+def Turn_Nicely():
+     #print("angle", angle
+     #print("right", Right)
+     Moderator()
+     sleep(0.1)
+     pwm.ChangeDutyCycle(Right_Turn)
+     sleep(0.1)
+     Asian()
+     sleep(0.1)
+     print(angle)
+     if (Left-11)< angle <(Left+11):
+         pwm.ChangeDutyCycle(Greg+2.5)
+         sleep(0.7)
+         pwm.ChangeDutyCycle(Greg-0.4)
+         sleep(0.7)
+         pwm.ChangeDutyCycle(Greg)
+         sleep(1)
+         Mtha = 0
+         Zyi = 2
+         Robin=0
+         globals()["DapOnItWagwan"]=1
+         Shell=0
+
+def Turn_Zhu():
+     #print("angle", angle
+     #print("right", Right)
+     Moderator()
+     sleep(0.1)
+     pwm.ChangeDutyCycle(Right_Turn)
+     sleep(0.1)
+     Asian()
+     sleep(0.1)
+     print(angle)
+     if (Straight-15)< angle <(Straight+13):
+         pwm.ChangeDutyCycle(Greg)
+         sleep(0.3)
+         globals()["Mtha"] = 0
+         Zyi = 0
+         Robin=0
+         globals()["DapOnItWagwan"]=1
+         Shell=0
+
+Collin=0
+lincoln = 1
+Shell=0
+Robin=0
+start()
+while True:
+    #print(Period_)
+    #threading.Thread(target = See_it(image)).start()
+    Mesut_Eyezil()
+    Asian()
+    globals()['Zyi']=0
+    globals()["SaySay"]=0
+    globals()["Mtha"]=0
+    globals()["PiTop"]=0
+    globals()["Stance"]=0
+    globals()["Swan"]=0
+    globals()["amen"]=0
+    #Right Turn Cycle
+    while Water == 1:
+
+        pwm.ChangeDutyCycle(Greg)
+        work_please()
+        #print("Indian")
+        #print(light_intensity)
+        while Zyi == 0:
+            #test tomorrow
+         #if Red_Block==1:
+             #Red_Sent()
+             #if Red_Block==0:
+              #   break
+          #if Green_Block==1:
+             #Green_Sent()
+             #if Green_Block==0:
+              #   break
+         Mesut_Eyezil()
+         sleep(0.1)
+         if distance < 160:
+             globals()["SaySay"]=1
+         while SaySay == 1:
+             #print("angle", angle
+             #print("right", Right)
+             Moderator()
+             sleep(0.1)
+             pwm.ChangeDutyCycle(Right_Turn)
+             sleep(0.1)
+             Asian()
+             sleep(0.1)
+             print(angle)
+             if (Right-15)< angle <(Right+14):
+                 pwm.ChangeDutyCycle(Greg+0.6)
+                 sleep(0.5)
+                 SaySay = 0
+                 Zyi = 1
+                 break
+         if Zyi == 1:
+             break
+
+#Turn Red Avoid
+        while Zyi == 1:
+         work_please()
+         Mesut_Eyezil()
+         if Zyi == 2:
+                 DapOnItWagwan=0
+                 break
+         elif amen == 1:
+             while Swan == 2:
+                 work_please()
+                 pwm.ChangeDutyCycle(Left_Turn)
+                 sleep(1)
+                 Stop = 0
+                 print('wheel')
+                 if (Right-10)< angle <(Right+10):
+                     pwm.ChangeDutyCycle(Greg-0.4)
+                     sleep(1)
+                     work_please()
+                     Red_Straight()
+                     work_please()
+                     Stop = 1
+                     break
+                 if Stop == 1:
+                     break
+         elif distance < 125:
+             print("lincoln")
+             print(distance)
+             globals()["Mtha"]=1
+             print('p meister')
+             while Mtha == 1:
+                 Turn_Asseblief()
+                 if DapOnItWagwan == 1:
+                     globals()["Zyi"] = 2
+                     DapOnItWagwan=0
+                     globals()["Mtha"]=0
+                     break
+
+        #Turn 3
+        print("vanani")
+        while Zyi == 2:
+        #Check Red
+         Mesut_Eyezil()
+         sleep(0.1)
+         if distance < 95:
+
+             globals()["SaySay"]=1
+             while SaySay == 1:
+                 #print("angle", angle
+                 #print("right", Right)
+                 Moderator()
+                 sleep(0.1)
+                 pwm.ChangeDutyCycle(Right_Turn)
+                 sleep(0.1)
+                 Asian()
+                 sleep(0.1)
+                 print(angle)
+                 if (Left-11)< angle <(Left+11):
+                     pwm.ChangeDutyCycle(Greg-4)
+                     sleep(0.4)
+                     pwm.ChangeDutyCycle(Greg+2)
+                     sleep(0.7)
+                     pwm.ChangeDutyCycle(Greg)
+                     sleep(0.5)
+                     SaySay = 0
+                     globals()["Zyi"] = 3
+                 if Zyi == 3:
+                     globals()["SaySay"] = 0
+                     break
+
+
+        #turn 4
+        while Zyi == 3:
+          Mesut_Eyezil()
+          sleep(0.1)
+          if distance < 80:
+             print("lincoln")
+             print(distance)
+             globals()["Mtha"]=1
+             print('p meister')
+             while Mtha == 1:
+                 Turn_Zhu()
+                 if DapOnItWagwan == 1:
+                     Zyi = 0
+                     globals()["DapOnItWagwan"]=0
+                     break
+             if Zyi == 0:
+                 break
+                 print('Go Sleep')
